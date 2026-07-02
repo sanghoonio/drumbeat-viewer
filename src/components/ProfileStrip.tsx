@@ -87,6 +87,15 @@ function corrColor(c: number | null): string {
   return `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
 }
 
+// Light tint of the scale color (red neg / blue pos) for the tooltip pill — translucent so it
+// reads over the tooltip background; opacity grows with |c|.
+function corrTint(c: number | null): string {
+  if (c == null || !Number.isFinite(c)) return "var(--color-base-200)";
+  const [r, g, b] = c < 0 ? NEG : POS;
+  const a = 0.12 + 0.28 * Math.min(1, Math.abs(c));
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
 export function ProfileStrip({
   coordinator,
   columns,
@@ -182,14 +191,19 @@ export function ProfileStrip({
           const desc = fieldDescription(hover.name);
           return (
             <div
-              className="pointer-events-none fixed z-50 w-64 max-w-[90vw] -translate-x-full -translate-y-1/2 rounded-md border border-base-300 bg-base-100 px-2.5 py-1.5 text-xs shadow-lg"
+              className="pointer-events-none fixed z-50 w-max max-w-md -translate-x-full -translate-y-1/2 rounded-md border border-base-300 bg-base-100 px-2.5 py-1.5 text-xs shadow-lg"
               style={{ left: hover.x - 8, top: Math.min(Math.max(hover.y, 44), window.innerHeight - 44) }}
             >
               <div>
                 <span className="font-medium text-base-content/80">
                   {fields.find((f) => f.name === hover.name)?.label}
                 </span>{" "}
-                <span className="tabular-nums text-base-content/50">r={fmtC(corr[hover.name] ?? null)}</span>
+                <span
+                  className="inline-block whitespace-nowrap rounded px-1.5 py-0.5 font-mono tabular-nums text-base-content/70"
+                  style={{ background: corrTint(corr[hover.name] ?? null) }}
+                >
+                  r = {fmtC(corr[hover.name] ?? null)}
+                </span>
               </div>
               {desc && <div className="mt-0.5 text-base-content/55">{desc}</div>}
             </div>
@@ -207,7 +221,7 @@ export function ProfileStrip({
 
       {groupHover && active && (
         <div
-          className="pointer-events-none fixed z-50 w-96 max-w-[90vw] -translate-x-full -translate-y-1/2 rounded-md border border-base-300 bg-base-100 px-2.5 py-1.5 text-xs shadow-lg"
+          className="pointer-events-none fixed z-50 w-max max-w-md -translate-x-full -translate-y-1/2 rounded-md border border-base-300 bg-base-100 px-2.5 py-1.5 text-xs shadow-lg"
           style={{
             left: groupHover.x - 8,
             // Clamp the vertical center so the tooltip stays on-screen near the top/bottom rows.

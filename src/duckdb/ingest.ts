@@ -28,10 +28,17 @@ export async function ingestFile(
   file: File,
 ): Promise<{ columns: ColumnInfo[]; rowCount: number }> {
   const buf = new Uint8Array(await file.arrayBuffer());
+  // Drop any prior registration of this name first: re-uploading a file with the same name
+  // (e.g. a re-exported topic) otherwise reuses DuckDB-wasm's cached parquet metadata against
+  // the new bytes → "Snappy decompression failure: Uncompressed data size mismatch".
+  await db.dropFile?.(file.name)?.catch(() => {});
   await db.registerFileBuffer(file.name, buf);
   await conn.query(
     `CREATE OR REPLACE TABLE data AS SELECT * FROM ${readerFor(file.name)}`,
   );
+  // `data` is now a materialized table; the file buffer is no longer needed. Free it so the
+  // next upload starts from a clean slate regardless of filename.
+  await db.dropFile?.(file.name)?.catch(() => {});
 
   const desc = await conn.query(`DESCRIBE data`);
   const columns = classifyColumns(

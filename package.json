@@ -1,0 +1,35 @@
+{
+  "name": "atlas-viewer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Self-contained DuckDB-wasm + Mosaic/vgplot viewer for atlas analysis exports. Drop an export, explore the embedding. No API server.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@duckdb/duckdb-wasm": "^1.30.0",
+    "@uwdata/mosaic-sql": "^0.21.0",
+    "@uwdata/vgplot": "^0.21.0",
+    "lucide-react": "^1.23.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-rnd": "^10.5.2",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.4.0",
+    "daisyui": "^5.0.0",
+    "tailwindcss": "^4.1.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.0",
+    "vite-plugin-top-level-await": "^1.5.0",
+    "vite-plugin-wasm": "^3.4.0"
+  }
+}

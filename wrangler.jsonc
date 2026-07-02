@@ -1,0 +1,9 @@
+{
+  // Cloudflare Pages config for the drumbeat-viewer SPA (static, no backend — a dropped
+  // atlas export is processed entirely in-browser via DuckDB-wasm). `npm run deploy` builds
+  // to ./dist and uploads it. Pick the sponsor account first with `wrangler login` (or set
+  // CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN).
+  "name": "drumbeat-viewer",
+  "compatibility_date": "2026-07-02",
+  "pages_build_output_dir": "dist"
+}

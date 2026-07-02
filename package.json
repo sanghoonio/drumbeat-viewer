@@ -1,5 +1,5 @@
 {
-  "name": "atlas-viewer",
+  "name": "drumbeat-viewer",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "deploy": "npm run build && npx wrangler pages deploy"
   },
   "dependencies": {
     "@duckdb/duckdb-wasm": "^1.30.0",
@@ -17,7 +18,6 @@
     "lucide-react": "^1.23.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-rnd": "^10.5.2",
     "zustand": "^5.0.3"
   },
   "devDependencies": {

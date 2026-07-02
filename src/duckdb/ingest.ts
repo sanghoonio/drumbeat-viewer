@@ -14,13 +14,18 @@ export type { ColumnInfo };
 type AsyncDuckDB = any;
 type AsyncDuckDBConnection = any;
 
-function readerFor(name: string): string {
-  const ext = name.toLowerCase().split(".").pop();
+function readerFor(name: string, ext: string): string {
   if (ext === "parquet") return `read_parquet('${name}')`;
   if (ext === "csv" || ext === "tsv") return `read_csv_auto('${name}')`;
   if (ext === "json" || ext === "ndjson") return `read_json_auto('${name}')`;
   throw new Error(`unsupported file type: .${ext} (use parquet, csv, or json)`);
 }
+
+// Monotonic counter → a fresh virtual filename per upload. DuckDB-wasm caches parquet blocks by
+// filename in its buffer manager, and `dropFile` doesn't flush that cache — so re-registering the
+// SAME name (e.g. a re-exported topic) reads stale blocks → "Snappy decompression failure:
+// Uncompressed data size mismatch". A never-seen name always reads clean.
+let uploadSeq = 0;
 
 export async function ingestFile(
   db: AsyncDuckDB,
@@ -28,17 +33,13 @@ export async function ingestFile(
   file: File,
 ): Promise<{ columns: ColumnInfo[]; rowCount: number }> {
   const buf = new Uint8Array(await file.arrayBuffer());
-  // Drop any prior registration of this name first: re-uploading a file with the same name
-  // (e.g. a re-exported topic) otherwise reuses DuckDB-wasm's cached parquet metadata against
-  // the new bytes → "Snappy decompression failure: Uncompressed data size mismatch".
-  await db.dropFile?.(file.name)?.catch(() => {});
-  await db.registerFileBuffer(file.name, buf);
-  await conn.query(
-    `CREATE OR REPLACE TABLE data AS SELECT * FROM ${readerFor(file.name)}`,
-  );
-  // `data` is now a materialized table; the file buffer is no longer needed. Free it so the
-  // next upload starts from a clean slate regardless of filename.
-  await db.dropFile?.(file.name)?.catch(() => {});
+  const ext = file.name.toLowerCase().split(".").pop() || "parquet";
+  const vname = `upload-${++uploadSeq}.${ext}`;
+  const reader = readerFor(vname, ext); // validates the extension before we register
+  await db.registerFileBuffer(vname, buf);
+  await conn.query(`CREATE OR REPLACE TABLE data AS SELECT * FROM ${reader}`);
+  // `data` is materialized; free the buffer (unique name means no future collision anyway).
+  await db.dropFile?.(vname)?.catch(() => {});
 
   const desc = await conn.query(`DESCRIBE data`);
   const columns = classifyColumns(

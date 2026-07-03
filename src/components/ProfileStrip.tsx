@@ -134,6 +134,9 @@ export function ProfileStrip({
   const [groupHover, setGroupHover] = useState<{ group: string; x: number; y: number } | null>(null);
   // Hint shown when the card is grayed out (no continuous color-by to correlate against).
   const [hint, setHint] = useState<{ x: number; y: number } | null>(null);
+  // Color scaling: "section" normalizes each group to its own strongest |r| (structure within a
+  // section); "fixed" uses the raw −1…+1 scale (magnitudes comparable across sections).
+  const [colorMode, setColorMode] = useState<"section" | "fixed">("section");
 
   useEffect(() => {
     if (!coordinator || fields.length === 0 || !active || !colorBy) {
@@ -170,6 +173,28 @@ export function ProfileStrip({
       onMouseMove={active ? undefined : (e) => setHint({ x: e.clientX, y: e.clientY })}
       onMouseLeave={active ? undefined : () => setHint(null)}
     >
+      {/* Color-scaling toggle, pinned to the top of the strip while the fields scroll under it. */}
+      <div className="sticky top-0 z-10 -mx-3 -mt-2.5 mb-1.5 bg-base-100 px-3 pb-1 pt-0.5">
+        <div className="flex gap-px rounded bg-base-200 p-0.5 text-[9px] leading-none">
+          {([
+            ["fixed", "abs", "Absolute scale: −1 to +1 (magnitudes comparable across sections)"],
+            ["section", "rel", "Relative: each section scaled to its own strongest correlation"],
+          ] as const).map(([m, label, title]) => (
+            <button
+              key={m}
+              title={title}
+              onClick={() => setColorMode(m)}
+              className={`flex-1 rounded-[3px] px-1 py-0.5 transition-colors ${
+                colorMode === m
+                  ? "bg-base-100 font-semibold text-base-content/80 shadow-sm"
+                  : "text-base-content/40 hover:text-base-content/60"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
       {fields.map((f) => {
         const c = active ? corr[f.name] ?? null : null;
         return (
@@ -198,7 +223,7 @@ export function ProfileStrip({
             >
               <span
                 className="h-3.5 w-3.5 shrink-0 rounded-sm"
-                style={{ background: corrColor(c, groupMax.get(f.group)) }}
+                style={{ background: corrColor(c, colorMode === "fixed" ? 1 : groupMax.get(f.group)) }}
               />
               <span className="text-[10px] tabular-nums text-base-content/50">{fmtC(c)}</span>
             </div>
@@ -252,8 +277,10 @@ export function ProfileStrip({
           <div className="font-medium text-base-content/80">{groupHover.group}</div>
           <div className="text-base-content/60">{GROUP_INFO[groupHover.group] ?? ""}</div>
           <div className="mt-0.5 text-base-content/40">
-            Pearson r vs the color-by variable ({colorBy ? fieldLabel(colorBy) : "—"}). Colors are
-            scaled per section, so this section's strongest correlation is fully saturated.
+            Pearson r vs {colorBy ? fieldLabel(colorBy) : "the color-by"}.{" "}
+            {colorMode === "section"
+              ? "Colors: each section scaled to its own strongest r."
+              : "Colors: fixed −1 to +1 scale."}
           </div>
         </div>
       )}

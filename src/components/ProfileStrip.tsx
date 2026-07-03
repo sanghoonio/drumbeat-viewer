@@ -1,8 +1,14 @@
 /**
  * Correlation strip: a thin labeled 1-column heatmap to the right of the umap. One cell per
- * continuous field (grouped by category), colored by its PEARSON correlation with the current
- * color-by variable over the live selection (brush / region / legend / search) — or the whole
- * corpus when nothing is selected.
+ * continuous field (grouped by category), colored by its correlation with the current color-by
+ * variable over the live selection (brush / region / legend / search) — or the whole corpus when
+ * nothing is selected.
+ *
+ * Correlation type: when ingest precomputed per-column global rank columns (`<name>__rank`), the
+ * query correlates the RANKS → Spearman (Pearson-on-ranks). The ranks are dataset-wide, so this is
+ * an APPROXIMATION of the true within-selection Spearman (very close; drifts only where a selection
+ * has little spread, where the correlation is ~0 anyway). When ranks are absent it correlates the
+ * raw columns → plain Pearson. Labels reflect which: `ρ ≈` vs `r`.
  *
  * Live via a MosaicClient filtered by the `catFilter` crossfilter: it re-runs a single
  * multi-`corr()` query on each selection change (fast — one pass over the rows for all fields).
@@ -27,18 +33,31 @@ interface Field {
 }
 
 /**
- * Live per-field Pearson correlation with the color-by, as a pre-aggregatable MosaicClient.
- * One row, one `corr()` column per field; `filterStable` since the field set is fixed.
+ * Live per-field correlation with the color-by, as a MosaicClient. One row, one `corr()` column per
+ * field. Correlates the precomputed `<name>__rank` columns when available (→ Spearman) and the raw
+ * columns otherwise (→ Pearson); `ranked` holds the base names that have a rank column.
  */
 class CorrClient extends MosaicClient {
   cb: string;
   fields: Field[];
+  ranked: Set<string>;
   onData: (m: Record<string, number | null>) => void;
-  constructor(filterSel: any, cb: string, fields: Field[], onData: (m: Record<string, number | null>) => void) {
+  constructor(
+    filterSel: any,
+    cb: string,
+    fields: Field[],
+    ranked: Set<string>,
+    onData: (m: Record<string, number | null>) => void,
+  ) {
     super(filterSel);
     this.cb = cb;
     this.fields = fields;
+    this.ranked = ranked;
     this.onData = onData;
+  }
+  // The physical column to correlate: the rank sentinel when present, else the raw column.
+  private col(name: string) {
+    return this.ranked.has(name) ? `${name}__rank` : name;
   }
   // Disable pre-aggregation: a materialized cube over ~100 corr columns (esp. keyed by the
   // region brush's post_id dimension) exhausts wasm memory. Fall back to a plain reactive query.
@@ -47,8 +66,9 @@ class CorrClient extends MosaicClient {
   }
   query(filter: any = []) {
     const sel: Record<string, any> = {};
+    const cbCol = this.col(this.cb);
     this.fields.forEach((f, i) => {
-      sel[`c${i}`] = vg.corr(vg.column(f.name), vg.column(this.cb));
+      sel[`c${i}`] = vg.corr(vg.column(this.col(f.name)), vg.column(cbCol));
     });
     return vg.Query.from("data").select(sel).where(filter);
   }
@@ -115,6 +135,12 @@ export function ProfileStrip({
   const cbCol = columns.find((c) => c.name === colorBy);
   const active = !!cbCol && isContinuous(cbCol); // correlation needs a continuous focal variable
 
+  // Base columns that have a precomputed `<name>__rank` (from ingest). Correlating ranks → Spearman.
+  const ranked = useMemo(() => new Set(columns.filter((c) => c.hasRank).map((c) => c.name)), [columns]);
+  // Spearman only when the color-by is itself ranked (the field set is the same rankable set, so a
+  // ranked color-by implies ranked rows). Approximate: ranks are dataset-wide, not per selection.
+  const spearman = !!cbCol?.hasRank;
+
   // Continuous fields to correlate, minus the color-by itself (its self-correlation is 1).
   const fields = useMemo<Field[]>(() => {
     const out: Field[] = [];
@@ -143,10 +169,10 @@ export function ProfileStrip({
       setCorr({});
       return;
     }
-    const client = new CorrClient(selections.catFilter, colorBy, fields, setCorr);
+    const client = new CorrClient(selections.catFilter, colorBy, fields, ranked, setCorr);
     coordinator.connect(client);
     return () => coordinator.disconnect(client);
-  }, [coordinator, fields, selections, colorBy, active]);
+  }, [coordinator, fields, selections, colorBy, active, ranked]);
 
   // Per-section color scale: the strongest |correlation| within each group. Each cell's color is
   // normalized against its own group's max, so sections are independently legible.
@@ -173,8 +199,8 @@ export function ProfileStrip({
       onMouseMove={active ? undefined : (e) => setHint({ x: e.clientX, y: e.clientY })}
       onMouseLeave={active ? undefined : () => setHint(null)}
     >
-      {/* Color-scaling toggle, pinned to the top of the strip while the fields scroll under it. */}
-      <div className="sticky top-0 z-10 -mx-3 -mt-2.5 mb-1.5 bg-base-100 px-3 pb-1 pt-0.5">
+      {/* Color-scaling toggle at the top of the strip; scrolls with the field list. */}
+      <div className="mb-0">
         <div className="flex gap-px rounded bg-base-200 p-0.5 text-[9px] leading-none">
           {([
             ["fixed", "abs", "Absolute scale: −1 to +1 (magnitudes comparable across sections)"],
@@ -248,7 +274,8 @@ export function ProfileStrip({
                   className="inline-block whitespace-nowrap rounded px-1.5 py-0.5 font-mono tabular-nums text-base-content/70"
                   style={{ background: corrTint(corr[hover.name] ?? null) }}
                 >
-                  r = {fmtC(corr[hover.name] ?? null)}
+                  {spearman ? "ρ ≈ " : "r = "}
+                  {fmtC(corr[hover.name] ?? null)}
                 </span>
               </div>
               {desc && <div className="mt-0.5 text-base-content/55">{desc}</div>}
@@ -277,7 +304,8 @@ export function ProfileStrip({
           <div className="font-medium text-base-content/80">{groupHover.group}</div>
           <div className="text-base-content/60">{GROUP_INFO[groupHover.group] ?? ""}</div>
           <div className="mt-0.5 text-base-content/40">
-            Pearson r vs {colorBy ? fieldLabel(colorBy) : "the color-by"}.{" "}
+            {spearman ? "Spearman ρ" : "Pearson r"} vs {colorBy ? fieldLabel(colorBy) : "the color-by"}.{" "}
+            {spearman && "Approximated from dataset-wide ranks. "}
             {colorMode === "section"
               ? "Colors: each section scaled to its own strongest r."
               : "Colors: fixed −1 to +1 scale."}

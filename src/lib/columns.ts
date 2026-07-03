@@ -10,6 +10,7 @@ export interface ColumnInfo {
   type: string;
   kind: "continuous" | "categorical" | "id";
   signed?: boolean; // continuous column with <= 0 (or null-only) values → log scale unsafe
+  hasRank?: boolean; // a "<name>__rank" column was precomputed at ingest (Spearman via Pearson-on-ranks)
 }
 
 const NUMERIC =

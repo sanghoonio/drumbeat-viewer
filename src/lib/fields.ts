@@ -23,7 +23,8 @@ const HIDE_EXACT = new Set([
   "hook_vader_seg_mean", "hook_vader_seg_min", "hook_vader_seg_max",
 ]);
 function isHidden(name: string): boolean {
-  return name.endsWith("_arc") || HIDE_PREFIX.some((p) => name.startsWith(p)) || HIDE_EXACT.has(name);
+  return name.endsWith("__rank") // precomputed rank sentinel columns (see rankableColumns)
+    || name.endsWith("_arc") || HIDE_PREFIX.some((p) => name.startsWith(p)) || HIDE_EXACT.has(name);
 }
 
 const CHANNEL: Record<string, string> = {
@@ -35,6 +36,7 @@ const META: Record<string, string> = {
   cluster: "Cluster",
   view_count: "Views", like_count: "Likes", comment_count: "Comments", share_count: "Shares",
   collect_count: "Saves", repost_count: "Reposts", author_follower_count: "Followers",
+  engagement_rate: "Engagement rate",
   create_time: "Post date", duration_ms: "Duration (ms)",
   platform: "Platform", region: "Region", content_type: "Content type", author_handle: "Author",
   has_transcript: "Has transcript", has_onscreen: "Has on-screen",
@@ -58,7 +60,7 @@ const METRIC: Record<string, string> = {
 
 const ENGAGEMENT = new Set([
   "view_count", "like_count", "comment_count", "share_count",
-  "collect_count", "repost_count", "author_follower_count",
+  "collect_count", "repost_count", "author_follower_count", "engagement_rate",
 ]);
 
 // Numeric-typed columns that are semantically categorical (so no color scale + an
@@ -100,7 +102,7 @@ const GOEMO_ORDER = [
 const META_ORDER = [
   "cluster",
   "view_count", "like_count", "comment_count", "share_count", "collect_count",
-  "repost_count", "author_follower_count",
+  "repost_count", "author_follower_count", "engagement_rate",
   "create_time", "duration_ms", "platform", "region", "content_type", "author_handle",
   "has_transcript", "has_onscreen", "transcript_confidence", "onscreen_confidence",
   "is_ad", "is_paid_partnership", "is_drumbeat",
@@ -167,6 +169,7 @@ const META_DESC: Record<string, string> = {
   collect_count: "Total saves.",
   repost_count: "Total reposts.",
   author_follower_count: "Author's follower count.",
+  engagement_rate: "(likes + comments + shares) ÷ views, for posts with recorded views. Derived on load.",
   create_time: "When the post was published.",
   duration_ms: "Video duration (milliseconds).",
   transcript_confidence: "Whisper transcription confidence.",
@@ -216,4 +219,15 @@ export function colorByGroups(columns: ColumnInfo[]): FieldGroup[] {
   for (const items of groups.values()) items.sort((a, b) => sortKey(a.name) - sortKey(b.name));
   const order = [...GROUP_ORDER, ...[...groups.keys()].filter((g) => !GROUP_ORDER.includes(g))];
   return order.filter((g) => groups.has(g)).map((g) => ({ group: g, items: groups.get(g)! }));
+}
+
+/**
+ * Continuous fields the correlation strip can use — the union of every possible ProfileStrip row
+ * AND color-by (continuous, non-id, non-excluded, non-hidden, non-categorical). Ingest precomputes
+ * a global rank column for exactly these, so `corr()` on the ranks yields (approximate) Spearman.
+ */
+export function rankableColumns(columns: ColumnInfo[]): string[] {
+  return columns
+    .filter((c) => c.kind !== "id" && !EXCLUDE.has(c.name) && !isHidden(c.name) && isContinuous(c))
+    .map((c) => c.name);
 }

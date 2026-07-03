@@ -80,9 +80,14 @@ const NEG = [178, 24, 43]; // red
 const MID = [237, 237, 237];
 const POS = [33, 102, 172]; // blue
 const lerp = (a: number[], b: number[], t: number) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
-function corrColor(c: number | null): string {
+
+// Each section (group) normalizes its cell colors to its OWN strongest |correlation| (`scale`),
+// so a section of weak-but-real correlations shows full contrast instead of washing out next to a
+// strongly-correlated section. `scale` is the per-group max |r| (see `groupMax` below); the group's
+// own strongest cell always saturates. Falls back to the raw [-1, 1] scale if `scale` is 0/absent.
+function corrColor(c: number | null, scale = 1): string {
   if (c == null || !Number.isFinite(c)) return "var(--color-base-200)";
-  const t = Math.max(-1, Math.min(1, c));
+  const t = Math.max(-1, Math.min(1, c / (scale > 0 ? scale : 1)));
   const col = t < 0 ? lerp(MID, NEG, -t) : lerp(MID, POS, t);
   return `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
 }
@@ -140,6 +145,19 @@ export function ProfileStrip({
     return () => coordinator.disconnect(client);
   }, [coordinator, fields, selections, colorBy, active]);
 
+  // Per-section color scale: the strongest |correlation| within each group. Each cell's color is
+  // normalized against its own group's max, so sections are independently legible.
+  const groupMax = useMemo(() => {
+    const m = new Map<string, number>();
+    if (!active) return m;
+    for (const f of fields) {
+      const c = corr[f.name];
+      if (c == null || !Number.isFinite(c)) continue;
+      m.set(f.group, Math.max(m.get(f.group) ?? 0, Math.abs(c)));
+    }
+    return m;
+  }, [corr, fields, active]);
+
   if (fields.length === 0) return null;
 
   const fmtC = (c: number | null) => (c == null ? "—" : `${c >= 0 ? "+" : ""}${c.toFixed(2)}`);
@@ -178,7 +196,10 @@ export function ProfileStrip({
               }}
               onMouseLeave={() => setHover((h) => (h?.name === f.name ? null : h))}
             >
-              <span className="h-3.5 w-3.5 shrink-0 rounded-sm" style={{ background: corrColor(c) }} />
+              <span
+                className="h-3.5 w-3.5 shrink-0 rounded-sm"
+                style={{ background: corrColor(c, groupMax.get(f.group)) }}
+              />
               <span className="text-[10px] tabular-nums text-base-content/50">{fmtC(c)}</span>
             </div>
           </Fragment>
@@ -231,7 +252,8 @@ export function ProfileStrip({
           <div className="font-medium text-base-content/80">{groupHover.group}</div>
           <div className="text-base-content/60">{GROUP_INFO[groupHover.group] ?? ""}</div>
           <div className="mt-0.5 text-base-content/40">
-            Pearson r vs the color-by variable ({colorBy ? fieldLabel(colorBy) : "—"}).
+            Pearson r vs the color-by variable ({colorBy ? fieldLabel(colorBy) : "—"}). Colors are
+            scaled per section, so this section's strongest correlation is fully saturated.
           </div>
         </div>
       )}

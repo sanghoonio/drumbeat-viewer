@@ -268,6 +268,12 @@ function CatCard({ coordinator, sel, col, onRemove }: {
   onRemove: () => void;
 }) {
   const clientRef = useRef<CatCountClient | null>(null);
+  // Stable clause source for this card's `cross` toggle. Must NOT be tied to `clientRef.current`:
+  // on unmount React runs effect cleanups top-to-bottom, so the client-connect cleanup nulls
+  // clientRef BEFORE the clear-on-unmount cleanup runs — a `clientRef.current ?? col` source would
+  // then fall back to `col` and fail to match the clause (whose source was the client), leaving the
+  // map highlighted after the card is deleted. A dedicated ref is stable across that lifecycle.
+  const crossSrc = useRef({}).current;
   const [totals, setTotals] = useState<{ cat: string; n: number }[]>([]);
   const [counts, setCounts] = useState<Map<string, number>>(new Map());
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -309,26 +315,26 @@ function CatCard({ coordinator, sel, col, onRemove }: {
   // map to "all points" between updates. The clause is cleared once on unmount below.
   useEffect(() => {
     const client = clientRef.current;
-    const source = client ?? col; // stable source key for clause replacement
+    // `clients` (self-exclusion in the crossfilter) rides the client; `source` is the stable ref.
     const clients = client ? new Set([client]) : undefined;
     const cats = [...selected];
     if (cats.length === 0) {
-      sel.cross.update({ source, clients, value: null, predicate: null });
+      sel.cross.update({ source: crossSrc, clients, value: null, predicate: null });
     } else {
       const inList = cats.map((c) => `'${c.replace(/'/g, "''")}'`).join(", ");
       sel.cross.update({
-        source,
+        source: crossSrc,
         clients,
         value: cats,
         predicate: vg.sql`CAST(${vg.column(col)} AS VARCHAR) IN (${inList})`,
       });
     }
-  }, [selected, sel, col]);
+  }, [selected, sel, col, crossSrc]);
 
   // Clear this card's toggle clause from `cross` on unmount only.
   useEffect(() => {
-    return () => sel.cross.update({ source: clientRef.current ?? col, value: null, predicate: null });
-  }, [sel, col]);
+    return () => sel.cross.update({ source: crossSrc, value: null, predicate: null });
+  }, [sel, crossSrc]);
 
   const toggle = (cat: string) =>
     setSelected((s) => {

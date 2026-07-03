@@ -17,14 +17,53 @@ import { PostCard } from "./PostCard";
 const compactFmt = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const monthYearFmt = new Intl.DateTimeFormat("en", { month: "short", year: "2-digit" });
 
-// Power-of-ten tick VALUES for a log/symlog domain — evenly spaced in log space, unlike
-// symlog's default (linearly-spaced) ticks, which bunch against the high end.
-function logTicks(lo: number, hi: number): number[] {
-  const t: number[] = [];
-  if (lo <= 0) t.push(0);
+// Legend tick label: compact for |v| >= 1 (1K, 1M) but a couple of significant digits for sub-1
+// values — compact's 1-fraction-digit rounding otherwise collapses e.g. 0.02 → "0" and 0.05 → "0.1"
+// (relevant for probability color-by fields like RoBERTa pos/neg).
+const numTickFmt = (d: any) => {
+  const n = Number(d);
+  if (!Number.isFinite(n)) return "";
+  if (n === 0 || Math.abs(n) >= 1) return compactFmt.format(n);
+  return n.toLocaleString("en", { maximumSignificantDigits: 2 });
+};
+
+// A small, clean set of log-nice tick VALUES for a log/symlog color legend, or null to let Plot
+// pick its own. Two regimes:
+//  - Positive domain (true `log` scale): adaptive mantissa density within [lo, hi] so we get ~3-7
+//    ticks — pure powers of ten when wide, 1-2-5 when medium, all integer mantissas when narrow.
+//    The previous version looped from 10**0, so a domain entirely below 1 (probabilities like
+//    RoBERTa pos/neg) produced an EMPTY array and a blank legend; walking the real exponent range
+//    covers sub-1 magnitudes too.
+//  - Domain touching/crossing 0 (`symlog` scale, e.g. counts with 0-view posts): 0 plus powers of
+//    ten (|v| >= 1) on each present side — symlog's own ticks are linearly spaced and bunch at the
+//    high end, so we must supply these explicitly.
+// Pathologically narrow domains (no nice tick lands inside) return null → Plot's default ticks.
+function logTicks(lo: number, hi: number): number[] | null {
+  if (!(hi > lo)) return null;
+  if (lo > 0) {
+    const within = (mantissas: number[]): number[] => {
+      const out: number[] = [];
+      const eStart = Math.floor(Math.log10(lo));
+      const eEnd = Math.ceil(Math.log10(hi));
+      for (let e = eStart; e <= eEnd; e++)
+        for (const m of mantissas) {
+          const v = m * 10 ** e;
+          if (v >= lo * (1 - 1e-9) && v <= hi * (1 + 1e-9)) out.push(v);
+        }
+      return out;
+    };
+    const decades = Math.log10(hi / lo);
+    const ticks =
+      decades >= 2 ? within([1]) // wide: powers of ten
+      : decades >= 0.7 ? within([1, 2, 5]) // medium: 1-2-5 per decade
+      : within([1, 2, 3, 4, 5, 6, 7, 8, 9]); // narrow: all mantissas
+    return ticks.length ? ticks.sort((a, b) => a - b) : null;
+  }
+  // symlog: 0 plus powers of ten with magnitude >= 1 on each present side.
+  const t: number[] = [0];
   for (let e = 0; 10 ** e <= hi; e++) t.push(10 ** e);
   if (lo < 0) for (let e = 0; 10 ** e <= -lo; e++) t.push(-(10 ** e));
-  return t.sort((a, b) => a - b);
+  return t.length > 1 ? t.sort((a, b) => a - b) : null;
 }
 
 interface Props {
@@ -276,7 +315,7 @@ export function Scatter({
             legendOpts.ticks = 5;
             legendOpts.tickFormat = dateCol
               ? (d: any) => monthYearFmt.format(new Date(Number(d)))
-              : (d: any) => compactFmt.format(Number(d));
+              : numTickFmt;
             // For log/symlog, hand Plot explicit power-of-ten ticks — symlog's default
             // (linear) ticks otherwise bunch against the high end of the ramp.
             if (!dateCol && scaleType === "log") {
@@ -285,7 +324,12 @@ export function Scatter({
                   `SELECT min("${colorBy}") AS lo, max("${colorBy}") AS hi FROM data`,
                   { type: "json" },
                 )) as { lo: any; hi: any }[];
-                if (r?.[0] && r[0].hi != null) legendOpts.ticks = logTicks(Number(r[0].lo), Number(r[0].hi));
+                if (r?.[0] && r[0].hi != null) {
+                  // Only override Plot's default ticks when we have a good multi-decade set;
+                  // otherwise leave `ticks: 5` so Plot/d3 chooses (avoids a blank sub-1 legend).
+                  const explicit = logTicks(Number(r[0].lo), Number(r[0].hi));
+                  if (explicit) legendOpts.ticks = explicit;
+                }
               } catch {
                 /* keep default ticks */
               }

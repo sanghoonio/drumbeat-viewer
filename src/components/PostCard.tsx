@@ -1,6 +1,7 @@
 /**
- * Floating, draggable detail card for a clicked post. Absolutely positioned inside the
- * umap's relative container and clamped to it, so it can be dragged anywhere over the plot
+ * Floating, draggable detail card for a clicked post. Opens beside the click point (flipping
+ * left/above when it wouldn't fit toward the right/bottom edge). Absolutely positioned inside
+ * the umap's relative container and clamped to it, so it can be dragged anywhere over the plot
  * but never covers the sidebar. Drag by the header, close with X. Drag uses window
  * listeners bound only during an active drag, so the card can't get stuck to the cursor.
  */
@@ -33,17 +34,46 @@ const META: [string, string][] = [
   ["Duration", "duration_ms"],
 ];
 
-export function PostCard({ row, onClose }: { row: Record<string, any>; onClose: () => void }) {
+export function PostCard({
+  row,
+  at,
+  onClose,
+}: {
+  row: Record<string, any>;
+  at?: { x: number; y: number } | null; // click point, viewport coords
+  onClose: () => void;
+}) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x: 16, y: 16 });
 
-  // Open at the top-right of the plot area (once size is known, before paint).
+  // Open beside the click point (once size is known, before paint), preferring right/below of
+  // the cursor and flipping to left/above when the card wouldn't fit inside the plot container
+  // on that side; re-runs per click (each click makes a fresh `at`), so a new selection moves
+  // the card next to it even if the old one was dragged elsewhere. Final clamp keeps it inside
+  // the container when it fits on neither side. No `at` → the old top-right default.
   useLayoutEffect(() => {
     const el = cardRef.current;
     const parent = el?.offsetParent as HTMLElement | null;
     if (!el || !parent) return;
-    setPos({ x: Math.max(0, parent.clientWidth - el.offsetWidth - 16), y: 16 });
-  }, []);
+    if (!at) {
+      setPos({ x: Math.max(0, parent.clientWidth - el.offsetWidth - 16), y: 16 });
+      return;
+    }
+    const PAD = 12; // gap between the cursor and the card
+    const pr = parent.getBoundingClientRect();
+    const cx = at.x - pr.left;
+    const cy = at.y - pr.top;
+    let x = cx + PAD;
+    if (x + el.offsetWidth > parent.clientWidth && cx - PAD - el.offsetWidth >= 0)
+      x = cx - PAD - el.offsetWidth;
+    let y = cy + PAD;
+    if (y + el.offsetHeight > parent.clientHeight && cy - PAD - el.offsetHeight >= 0)
+      y = cy - PAD - el.offsetHeight;
+    setPos({
+      x: clamp(x, 0, parent.clientWidth - el.offsetWidth),
+      y: clamp(y, 0, parent.clientHeight - el.offsetHeight),
+    });
+  }, [at]);
 
   // Drag via window listeners bound only for the duration of a drag — they always tear
   // down on mouseup, so the card can't get stuck following the cursor.
@@ -73,7 +103,7 @@ export function PostCard({ row, onClose }: { row: Record<string, any>; onClose: 
   const stats = STATS.filter(([, k]) => k in row);
   const caption = has("caption") ? String(row.caption) : "";
   const keywords = has("cluster_keywords")
-    ? String(row.cluster_keywords).split(" | ").slice(0, 6).join(", ")
+    ? String(row.cluster_keywords).split(" | ").slice(0, 6)
     : null;
   const url = has("url") ? String(row.url) : null;
 
@@ -120,9 +150,6 @@ export function PostCard({ row, onClose }: { row: Record<string, any>; onClose: 
 
         <div>
           {has("create_time") && <Field label="Posted" value={dateTime(row.create_time)} />}
-          {has("cluster") && (
-            <Field label="Cluster" value={keywords ? `${row.cluster} · ${keywords}` : String(row.cluster)} />
-          )}
           {META.filter(([, k]) => has(k)).map(([label, k]) => (
             <Field
               key={k}
@@ -130,6 +157,24 @@ export function PostCard({ row, onClose }: { row: Record<string, any>; onClose: 
               value={k === "duration_ms" ? `${(Number(row[k]) / 1000).toFixed(1)}s` : String(row[k])}
             />
           ))}
+          {has("cluster") && <Field label="Cluster" value={String(row.cluster)} />}
+          {/* Cluster keyword examples as pills under their own label — combined with the
+              number they made one clogged, over-long row. */}
+          {keywords && (
+            <div className="py-0.5">
+              <div className="text-base-content/50">Cluster keywords</div>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {keywords.map((k) => (
+                  <span
+                    key={k}
+                    className="rounded-full bg-base-200 px-1.5 py-0.5 text-[10px] leading-none text-base-content/60"
+                  >
+                    {k}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {stats.length > 0 && (

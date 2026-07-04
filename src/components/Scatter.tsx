@@ -88,11 +88,15 @@ export function Scatter({
   // when unset (a default-empty selection would otherwise match ALL rows).
   const pinSel = useMemo(() => vg.Selection.single({ empty: true }), []);
   const pinSrc = useRef({}).current;
-  const [selected, setSelected] = useState<Record<string, any> | null>(null);
+  // The clicked row plus the click's viewport coords, so the card can open beside the cursor.
+  const [selected, setSelected] = useState<{
+    row: Record<string, any>;
+    at: { x: number; y: number };
+  } | null>(null);
 
   // Keep the pin in sync with the open card: ring the selected point until it closes.
   useEffect(() => {
-    const id = selected?.post_id;
+    const id = selected?.row.post_id;
     if (id == null) {
       pinSel.update({ source: pinSrc, value: null, predicate: null });
     } else {
@@ -109,16 +113,22 @@ export function Scatter({
     selections.legend.reset();
   }, [colorBy, selections]);
 
-  const openAt = async () => {
+  const openAt = async (x: number, y: number) => {
     const v = clickSel.value;
-    if (v == null || !coordinator) return;
+    // Click with no point in `nearest` range (empty area) → deselect: close the card (which
+    // also clears the pin ring via the effect above) instead of leaving a stale one open.
+    if (v == null) {
+      setSelected(null);
+      return;
+    }
+    if (!coordinator) return;
     const id = String(v);
     try {
       const rows = (await coordinator.query(
         `SELECT * FROM data WHERE post_id = '${id.replace(/'/g, "''")}' LIMIT 1`,
         { type: "json" },
       )) as Record<string, any>[];
-      if (rows?.[0]) setSelected(rows[0]);
+      if (rows?.[0]) setSelected({ row: rows[0], at: { x, y } });
     } catch {
       /* ignore */
     }
@@ -137,7 +147,7 @@ export function Scatter({
     let dn: { x: number; y: number } | null = null;
     const onDown = (e: PointerEvent) => (dn = { x: e.clientX, y: e.clientY });
     const onUp = (e: PointerEvent) => {
-      if (dn && Math.hypot(e.clientX - dn.x, e.clientY - dn.y) <= 6) openRef.current();
+      if (dn && Math.hypot(e.clientX - dn.x, e.clientY - dn.y) <= 6) openRef.current(e.clientX, e.clientY);
       dn = null;
     };
     el.addEventListener("pointerdown", onDown, true);
@@ -357,7 +367,7 @@ export function Scatter({
   return (
     <div className="relative h-full w-full">
       <div ref={plotRef} className="h-full w-full text-base-content/70" />
-      {selected && <PostCard row={selected} onClose={() => setSelected(null)} />}
+      {selected && <PostCard row={selected.row} at={selected.at} onClose={() => setSelected(null)} />}
     </div>
   );
 }

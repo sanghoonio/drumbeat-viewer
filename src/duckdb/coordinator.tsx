@@ -19,6 +19,14 @@ import {
 } from "react";
 import { ingestFile, type ColumnInfo } from "./ingest";
 
+// Non-null while a dropped file is being ingested (parse + derive + rank precompute) —
+// drives the full-screen loading overlay. `frac` is a rough phase-weighted fraction.
+export interface LoadingState {
+  name: string;
+  label: string;
+  frac: number;
+}
+
 interface CoordinatorState {
   coordinator: any | null; // vg.Coordinator
   db: any | null; // duckdb AsyncDuckDB (from the connector)
@@ -27,6 +35,7 @@ interface CoordinatorState {
   columns: ColumnInfo[];
   rowCount: number;
   fileName: string | null;
+  loading: LoadingState | null;
   loadFile: (file: File) => Promise<void>;
   clear: () => void;
   error: string | null;
@@ -42,6 +51,7 @@ export function CoordinatorProvider({ children }: { children: ReactNode }) {
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
   const [rowCount, setRowCount] = useState(0);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [loading, setLoading] = useState<LoadingState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -76,12 +86,19 @@ export function CoordinatorProvider({ children }: { children: ReactNode }) {
       columns,
       rowCount,
       fileName,
+      loading,
       error,
       loadFile: async (file: File) => {
         if (!dbRef.current || !connRef.current) throw new Error("duckdb not ready");
         setError(null);
+        setLoading({ name: file.name, label: "reading file…", frac: 0 });
         try {
-          const { columns, rowCount } = await ingestFile(dbRef.current, connRef.current, file);
+          const { columns, rowCount } = await ingestFile(
+            dbRef.current,
+            connRef.current,
+            file,
+            (label, frac) => setLoading({ name: file.name, label, frac }),
+          );
           coordinatorRef.current?.clear({ clients: true, cache: true });
           setColumns(columns);
           setRowCount(rowCount);
@@ -89,6 +106,8 @@ export function CoordinatorProvider({ children }: { children: ReactNode }) {
         } catch (e) {
           setError(String(e));
           throw e;
+        } finally {
+          setLoading(null);
         }
       },
       clear: () => {
@@ -100,7 +119,7 @@ export function CoordinatorProvider({ children }: { children: ReactNode }) {
         coordinatorRef.current?.clear({ clients: true, cache: true });
       },
     }),
-    [ready, columns, rowCount, fileName, error],
+    [ready, columns, rowCount, fileName, loading, error],
   );
 
   return <Ctx.Provider value={state}>{children}</Ctx.Provider>;

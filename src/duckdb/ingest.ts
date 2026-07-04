@@ -33,16 +33,24 @@ function readerFor(name: string, ext: string): string {
 // Uncompressed data size mismatch". A never-seen name always reads clean.
 let uploadSeq = 0;
 
+// Ingest phases for the loading overlay: a label plus a rough fraction-complete. The fractions
+// are hand-weighted (materializing the table and the rank window-sorts dominate), not measured.
+export type IngestProgress = (label: string, frac: number) => void;
+
 export async function ingestFile(
   db: AsyncDuckDB,
   conn: AsyncDuckDBConnection,
   file: File,
+  onProgress?: IngestProgress,
 ): Promise<{ columns: ColumnInfo[]; rowCount: number }> {
+  const step: IngestProgress = (label, frac) => onProgress?.(label, frac);
+  step("reading file…", 0.03);
   const buf = new Uint8Array(await file.arrayBuffer());
   const ext = file.name.toLowerCase().split(".").pop() || "parquet";
   const vname = `upload-${++uploadSeq}.${ext}`;
   const reader = readerFor(vname, ext); // validates the extension before we register
   await db.registerFileBuffer(vname, buf);
+  step("validating…", 0.12);
 
   // Reject oversized uploads BEFORE materializing the table (parquet count is metadata-cheap;
   // CSV/JSON stream-count without building columns), so a huge file can't stall/OOM the wasm engine.
@@ -56,6 +64,7 @@ export async function ingestFile(
     );
   }
 
+  step("loading table…", 0.25);
   await conn.query(`CREATE OR REPLACE TABLE data AS SELECT * FROM ${reader}`);
   // `data` is materialized; free the buffer (unique name means no future collision anyway).
   await db.dropFile?.(vname)?.catch(() => {});
@@ -70,6 +79,7 @@ export async function ingestFile(
   // then dominate the color/axis domain and flatten the real [0, ~0.5] bulk to zero. `::DOUBLE`
   // forces float division. Only when the source counts are present and it isn't already exported;
   // wrapped so a non-numeric count column just skips the field instead of failing the whole load.
+  step("deriving fields…", 0.5);
   const present = new Set(descRows.map((r) => r.name));
   const ENG_SRC = ["like_count", "comment_count", "share_count", "view_count"];
   if (ENG_SRC.every((c) => present.has(c)) && !present.has("engagement_rate")) {
@@ -108,6 +118,7 @@ export async function ingestFile(
   // over the whole upload; validated to approximate the true within-selection Spearman closely
   // (mean |err| ~0.01), degrading only where a selection has little spread (r ≈ 0 anyway).
   // NULL-masked (NULLs stay NULL → ignored pairwise by corr), min-rank ties, cast to FLOAT.
+  step("precomputing ranks…", 0.65);
   const existing = new Set(descRows.map((r) => r.name));
   const rankable = rankableColumns(columns).filter((c) => !existing.has(`${c}__rank`));
   if (rankable.length && rowCount > 0) {
@@ -126,5 +137,6 @@ export async function ingestFile(
     }
   }
 
+  step("done", 1);
   return { columns, rowCount };
 }

@@ -17,7 +17,7 @@ import { ProfileStrip } from "./components/ProfileStrip";
 import { DropZone } from "./components/DropZone";
 
 export function App() {
-  const { ready, columns, rowCount, fileName, loadFile, clear, coordinator, error } = useCoordinator();
+  const { ready, columns, rowCount, fileName, loading, loadFile, clear, coordinator, error } = useCoordinator();
   const { xCol, yCol, colorBy, scaleType, setXY, setColorBy } = useView();
   const selections = useMemo(() => (ready ? createSelections() : null), [ready]);
   const legendRef = useRef<HTMLDivElement>(null);
@@ -73,6 +73,25 @@ export function App() {
       )}
 
       {ready && !hasData && <DropZone onFile={loadFile} error={error} />}
+
+      {/* Ingest overlay (parse + derived fields + rank precompute) — style matches pegasus'
+          database-download screen: blurred full-screen veil, thin phase-weighted bar, caption. */}
+      {loading && (
+        <div className="fixed inset-0 z-[99999] flex flex-col items-center justify-center gap-4 bg-base-100/95 backdrop-blur-sm">
+          <span className="max-w-md truncate text-sm font-medium text-base-content/80">
+            loading {loading.name}…
+          </span>
+          <div className="flex w-72 flex-col items-center gap-1">
+            <div className="h-1 w-full overflow-hidden rounded-full bg-base-200">
+              <div
+                className="h-full bg-primary transition-[width] duration-300"
+                style={{ width: `${Math.round(loading.frac * 100)}%` }}
+              />
+            </div>
+            <span className="text-xs tabular-nums text-base-content/50">{loading.label}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,5 +1,7 @@
 /**
- * The embedding scatter — pure vgplot, native continuous color.
+ * The main scatter — pure vgplot, native continuous color. Plots whatever x/y columns it's
+ * given: the umap embedding by default, or two chosen variables in the correlation view
+ * (which adds per-axis scales via xScale/yScale and axis values in the tooltip via tipAxes).
  * Template: tessera pre-embedding-atlas impl (commit 665d9a0 UmapPlot.tsx).
  * Fills its parent; the interactive color legend renders into the sidebar slot.
  */
@@ -71,6 +73,9 @@ interface Props {
   columns: ColumnInfo[];
   xCol: string;
   yCol: string;
+  xScale?: ScaleType; // correlation view: per-axis scale (log falls back to symlog for signed cols)
+  yScale?: ScaleType;
+  tipAxes?: boolean; // correlation view: surface the x/y values in the tooltip
   colorBy: string | null;
   scaleType: ScaleType;
   selections: Selections;
@@ -78,7 +83,7 @@ interface Props {
 }
 
 export function Scatter({
-  coordinator, columns, xCol, yCol, colorBy, scaleType, selections, legendRef,
+  coordinator, columns, xCol, yCol, xScale, yScale, tipAxes, colorBy, scaleType, selections, legendRef,
 }: Props) {
   const plotRef = useRef<HTMLDivElement>(null);
   // `nearest` tracks the post under the pointer into `clickSel`; we read its active
@@ -163,16 +168,54 @@ export function Scatter({
     const el = plotRef.current;
     let disposed = false;
     let plotInst: any = null;
-    // Rebuilding the plot (e.g. on color-by change) orphans the region/nearest brush clauses
-    // in their selections — the rubber-band vanishes but keeps dimming the map. Clear THIS
-    // plot's interactor clauses before replacing it, so the umap brush resets on rebuild.
-    const clearInteractors = () => {
+    let legendInst: any = null;
+    // Full teardown of the outgoing plot. vgplot connects marks to the coordinator but has no
+    // destroy path, so without this every rebuild (mode/color-by switch, resize) leaks work
+    // that compounds brush latency:
+    //  - stale marks stay in the coordinator's clamp/pin filter groups → every selection
+    //    change re-queries them and re-renders their dead off-DOM plots;
+    //  - each Highlight interactor leaves an unremovable throttled 'value' listener on the
+    //    session-lived highlight selection, and its update() runs a DuckDB predicate query
+    //    then walks every dot node of the dead SVG — per stale instance, per brush frame;
+    //  - each categorical legend leaves a 'value' listener on the legend selection.
+    // The listeners themselves can't be removed (anonymous), but each has a cheap early-out
+    // we can force: Highlight.update() bails when `svg` is null, Legend.update() when
+    // `legend` is null. Disconnecting the marks handles the coordinator side.
+    const teardown = () => {
       for (const it of plotInst?.interactors ?? []) {
         try {
+          // Orphaned region/nearest brush clauses would keep dimming the map with the
+          // rubber-band gone — clear THIS plot's clauses so the brush resets on rebuild.
           it.selection?.update({ source: it, value: null, predicate: null });
         } catch {
           /* ignore */
         }
+        it.svg = null; // Highlight/Region/Nearest all no-op without their svg
+        if (Array.isArray(it.nodes)) it.nodes = [];
+        if (Array.isArray(it.values)) it.values = [];
+      }
+      for (const m of plotInst?.marks ?? []) {
+        try {
+          m.destroy?.(); // MosaicClient.destroy → coordinator.disconnect + request cleanup
+        } catch {
+          /* ignore */
+        }
+      }
+      if (legendInst) {
+        try {
+          // The legend's brush/toggle handler is NOT in plot.interactors — it lives on
+          // legend.handler with `source: this` clauses. Clear its clause from the
+          // session-lived legend selection, or a legend brush would keep dimming the map
+          // forever once its legend is replaced (embedding ↔ correlation switch).
+          legendInst.handler?.selection?.update({
+            source: legendInst.handler, value: null, predicate: null,
+          });
+        } catch {
+          /* ignore */
+        }
+        legendInst.legend = null; // Legend.update() early-outs; drops dead-DOM refs
+        legendInst.handler = null;
+        legendInst = null;
       }
       plotInst = null;
     };
@@ -184,7 +227,7 @@ export function Scatter({
 
     const render = async () => {
       if (disposed) return;
-      clearInteractors();
+      teardown();
       const w = el.clientWidth || 800;
       const h = el.clientHeight || 600;
       const api = vg.createAPIContext({ coordinator });
@@ -250,15 +293,20 @@ export function Scatter({
         Author: fmtStr, Platform: fmtStr, "Post date": fmtDate, Cluster: fmtStr,
         Views: fmtInt, Likes: fmtInt, Comments: fmtInt,
       };
-      // Also surface the active color-by value if it isn't already listed.
-      if (colorBy && present.has(colorBy) && !addCols.has(colorBy)) {
-        const lbl = fieldLabel(colorBy);
-        if (!(lbl in tipChannels)) {
-          tipChannels[lbl] = colorBy;
-          const c = columns.find((x) => x.name === colorBy);
-          if (!(lbl in tipFormat)) tipFormat[lbl] = c && isContinuous(c) ? fmtNum : fmtStr;
-        }
+      // Also surface the correlation axes and the active color-by value if not already listed.
+      const surface = (name: string | null | undefined) => {
+        if (!name || !present.has(name) || addCols.has(name)) return;
+        const lbl = fieldLabel(name);
+        if (lbl in tipChannels) return;
+        tipChannels[lbl] = name;
+        const c = columns.find((x) => x.name === name);
+        if (!(lbl in tipFormat)) tipFormat[lbl] = c && isContinuous(c) ? fmtNum : fmtStr;
+      };
+      if (tipAxes) {
+        surface(xCol);
+        surface(yCol);
       }
+      surface(colorBy);
       tipChannels.post_id = "post_id"; // needed by region/nearest; hidden via tipFormat
 
       const args: any[] = [
@@ -288,12 +336,50 @@ export function Scatter({
           stroke: "var(--color-base-content)",
           strokeWidth: 2.5,
         }),
-        api.xLabel(xCol),
-        api.yLabel(yCol),
+        api.xLabel(fieldLabel(xCol)),
+        api.yLabel(fieldLabel(yCol)),
         api.width(w),
         api.height(h),
         api.margin(36),
       ];
+      // Correlation-view axis scales. Same log caveat as color: a true log axis needs a
+      // strictly positive domain, so signed columns (counts with 0s included) get symlog.
+      const axisType = (s: ScaleType | undefined, name: string) => {
+        if (!s || s === "linear") return null;
+        if (s === "log") return columns.find((c) => c.name === name)?.signed ? "symlog" : "log";
+        return s;
+      };
+      const xs = axisType(xScale, xCol);
+      const ys = axisType(yScale, yCol);
+      if (xs) args.push(api.xScale(xs));
+      if (ys) args.push(api.yScale(ys));
+      // Long numeric tick labels (counts on a log/symlog y-axis) need more room than umap's.
+      if (ys) args.push(api.marginLeft(52));
+      // Correlation axes get the legend's tick treatment: compact labels (so "1,000,000"
+      // never stacks into its neighbor) and, on log/symlog, explicit log-nice tick VALUES —
+      // symlog's default ticks are linearly spaced and bunch/overlap at the high end.
+      if (xScale) args.push(api.xTickFormat(numTickFmt));
+      if (yScale) args.push(api.yTickFormat(numTickFmt));
+      const logAxes: ["x" | "y", string][] = [];
+      if (xs === "log" || xs === "symlog") logAxes.push(["x", xCol]);
+      if (ys === "log" || ys === "symlog") logAxes.push(["y", yCol]);
+      if (logAxes.length) {
+        try {
+          const sel = logAxes
+            .map(([ax, c]) => `min("${c}") AS "${ax}_lo", max("${c}") AS "${ax}_hi"`)
+            .join(", ");
+          const r = (await coordinator.query(`SELECT ${sel} FROM data`, { type: "json" })) as any[];
+          if (disposed) return;
+          for (const [ax] of logAxes) {
+            if (r?.[0]?.[`${ax}_hi`] == null) continue;
+            const t = logTicks(Number(r[0][`${ax}_lo`]), Number(r[0][`${ax}_hi`]));
+            // No good multi-decade set → leave Plot/d3's own ticks (avoids a blank axis).
+            if (t) args.push(ax === "x" ? api.xTicks(t) : api.yTicks(t));
+          }
+        } catch {
+          /* keep default ticks */
+        }
+      }
       if (colorBy && !categorical) {
         // True log needs a strictly positive domain; when the column has 0/negatives
         // (col.signed) fall back to symlog, which is log-like but defined at/below 0.
@@ -345,7 +431,9 @@ export function Scatter({
               }
             }
           }
-          legendRef.current.replaceChildren(api.colorLegend(legendOpts));
+          const legendEl = api.colorLegend(legendOpts);
+          legendInst = (legendEl as any).value; // Legend instance, for teardown
+          legendRef.current.replaceChildren(legendEl);
         } else {
           legendRef.current.replaceChildren();
         }
@@ -358,11 +446,11 @@ export function Scatter({
     return () => {
       disposed = true;
       ro.disconnect();
-      clearInteractors();
+      teardown();
       el.replaceChildren();
       if (legendRef.current) legendRef.current.replaceChildren();
     };
-  }, [coordinator, columns, xCol, yCol, colorBy, scaleType, selections, legendRef, clickSel, pinSel]);
+  }, [coordinator, columns, xCol, yCol, xScale, yScale, tipAxes, colorBy, scaleType, selections, legendRef, clickSel, pinSel]);
 
   return (
     <div className="relative h-full w-full">

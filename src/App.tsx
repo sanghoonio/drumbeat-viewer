@@ -9,6 +9,7 @@ import { useView } from "./stores/view";
 import { applyTheme, useTheme } from "./stores/theme";
 import { createSelections } from "./selections";
 import { defaultColorBy, defaultXY } from "./lib/columns";
+import { axisGroups } from "./lib/fields";
 import { Scatter } from "./components/Scatter";
 import { Sidebar } from "./components/Sidebar";
 import { FilterPanel } from "./components/FilterPanel";
@@ -18,7 +19,10 @@ import { DropZone } from "./components/DropZone";
 
 export function App() {
   const { ready, columns, rowCount, fileName, loading, loadFile, clear, coordinator, error } = useCoordinator();
-  const { xCol, yCol, colorBy, scaleType, setXY, setColorBy } = useView();
+  const {
+    xCol, yCol, colorBy, scaleType, setXY, setColorBy,
+    plotMode, setPlotMode, corrX, corrY, corrXScale, corrYScale, setCorrX, setCorrY,
+  } = useView();
   const selections = useMemo(() => (ready ? createSelections() : null), [ready]);
   const legendRef = useRef<HTMLDivElement>(null);
   const themeMode = useTheme((s) => s.mode);
@@ -29,9 +33,17 @@ export function App() {
     const { x, y } = defaultXY(columns);
     setXY(x, y);
     setColorBy(defaultColorBy(columns));
-  }, [columns, setXY, setColorBy]);
+    // Fresh upload → back to the embedding, with the first two continuous fields (display
+    // order, so engagement leads) as the correlation view's starting pair.
+    setPlotMode("embedding");
+    const axes = axisGroups(columns).flatMap((g) => g.items);
+    setCorrX(axes[0]?.name ?? null);
+    setCorrY(axes[1]?.name ?? null);
+  }, [columns, setXY, setColorBy, setPlotMode, setCorrX, setCorrY]);
 
   const hasData = rowCount > 0 && !!xCol && !!yCol;
+  // Fall back to the embedding axes if correlation mode somehow lacks a pair.
+  const corrMode = plotMode === "correlation" && !!corrX && !!corrY;
 
   return (
     <div className="flex h-full min-h-0 bg-base-100 text-base-content">
@@ -60,8 +72,11 @@ export function App() {
             <Scatter
               coordinator={coordinator}
               columns={columns}
-              xCol={xCol!}
-              yCol={yCol!}
+              xCol={corrMode ? corrX! : xCol!}
+              yCol={corrMode ? corrY! : yCol!}
+              xScale={corrMode ? corrXScale : undefined}
+              yScale={corrMode ? corrYScale : undefined}
+              tipAxes={corrMode}
               colorBy={colorBy}
               scaleType={scaleType}
               selections={selections}

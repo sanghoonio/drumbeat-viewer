@@ -1,9 +1,9 @@
-/** Sticky control card on the left: dataset info, color-by, scale, legend, reload. */
+/** Sticky control card on the left: dataset info, plot mode, color-by, scale, legend, reload. */
 import { useEffect, type RefObject } from "react";
 import { Trash2 } from "lucide-react";
 import type { ColumnInfo } from "../lib/columns";
-import { colorByGroups, isContinuous } from "../lib/fields";
-import { useView, type ScaleType } from "../stores/view";
+import { axisGroups, colorByGroups, isContinuous, type FieldGroup } from "../lib/fields";
+import { useView, type PlotMode, type ScaleType } from "../stores/view";
 
 interface Props {
   columns: ColumnInfo[];
@@ -13,9 +13,60 @@ interface Props {
   legendRef: RefObject<HTMLDivElement | null>;
 }
 
+/** One correlation axis: variable picker + a compact per-axis scale picker. */
+function AxisPicker({ label, groups, value, scale, onColumn, onScale }: {
+  label: string;
+  groups: FieldGroup[];
+  value: string | null;
+  scale: ScaleType;
+  onColumn: (c: string | null) => void;
+  onScale: (s: ScaleType) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-base-content/70">{label}</span>
+      <div className="flex gap-1.5">
+        <select
+          className="select select-bordered select-sm min-w-0 flex-1"
+          value={value ?? ""}
+          onChange={(e) => onColumn(e.target.value || null)}
+        >
+          {groups.map((g) => (
+            <optgroup key={g.group} label={g.group}>
+              {g.items.map((it) => (
+                <option key={it.name} value={it.name}>
+                  {it.label}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        <select
+          className="select select-bordered select-sm w-20 shrink-0"
+          value={scale}
+          onChange={(e) => onScale(e.target.value as ScaleType)}
+          title={`${label} scale`}
+          aria-label={`${label} scale`}
+        >
+          <option value="linear">linear</option>
+          <option value="sqrt">sqrt</option>
+          <option value="log">log</option>
+        </select>
+      </div>
+    </label>
+  );
+}
+
 export function Sidebar({ columns, rowCount, fileName, onRemove, legendRef }: Props) {
-  const { colorBy, setColorBy, scaleType, setScaleType } = useView();
+  const {
+    plotMode, setPlotMode, colorBy, setColorBy, scaleType, setScaleType,
+    corrX, corrY, setCorrX, setCorrY,
+    corrXScale, corrYScale, setCorrXScale, setCorrYScale,
+  } = useView();
   const groups = colorByGroups(columns);
+  const axGroups = axisGroups(columns);
+  // The correlation view needs two continuous variables to scatter.
+  const canCorrelate = axGroups.reduce((n, g) => n + g.items.length, 0) >= 2;
   const col = columns.find((c) => c.name === colorBy);
   const continuous = !!col && isContinuous(col); // semantic (cluster etc. are categorical)
 
@@ -45,6 +96,29 @@ export function Sidebar({ columns, rowCount, fileName, onRemove, legendRef }: Pr
           {rowCount.toLocaleString()} rows · {columns.length} columns
         </div>
       </div>
+
+      {canCorrelate && (
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-base-content/70">Plot</span>
+          <select
+            className="select select-bordered select-sm w-full"
+            value={plotMode}
+            onChange={(e) => setPlotMode(e.target.value as PlotMode)}
+          >
+            <option value="embedding">Embedding</option>
+            <option value="correlation">Correlation</option>
+          </select>
+        </label>
+      )}
+
+      {plotMode === "correlation" && (
+        <>
+          <AxisPicker label="X axis" groups={axGroups} value={corrX} scale={corrXScale}
+                      onColumn={setCorrX} onScale={setCorrXScale} />
+          <AxisPicker label="Y axis" groups={axGroups} value={corrY} scale={corrYScale}
+                      onColumn={setCorrY} onScale={setCorrYScale} />
+        </>
+      )}
 
       <label className="block">
         <span className="mb-1 block text-xs font-medium text-base-content/70">Color by</span>

@@ -4,8 +4,9 @@
  * live selection (brush / region / legend / search) — or the whole corpus when nothing is
  * selected. A popover (▾ button at the top) picks the statistic and the color scaling.
  *
- * Statistics:
- * - "spearman" (default): correlation of the precomputed `<name>__rank` columns (from ingest)
+ * Statistics ("zmean" is the initial pick — it works with any color-by, so the strip never
+ * switches statistic on its own; correlations activate only when chosen in the picker):
+ * - "spearman": correlation of the precomputed `<name>__rank` columns (from ingest)
  *   with the color-by's ranks → Spearman (Pearson-on-ranks). The ranks are dataset-wide, so this
  *   is an APPROXIMATION of the true within-selection Spearman (very close; drifts only where a
  *   selection has little spread, where the correlation is ~0 anyway). Falls back per-column to
@@ -192,7 +193,11 @@ export function ProfileStrip({
   // Statistic + color scaling: "section" normalizes each group to its own strongest |value|
   // (structure within a section); "fixed" uses the metric's natural scale (comparable across
   // sections). Both live in the ▾ popover.
-  const [metric, setMetric] = useState<Metric>("spearman");
+  // "zmean" default matters: the default color-by (cluster) is categorical, so the strip OPENS
+  // showing the zmean fallback either way — but if the state defaulted to a correlation metric,
+  // merely switching to a continuous color-by would flip the displayed statistic to a metric the
+  // user never picked. The statistic must only change via the picker.
+  const [metric, setMetric] = useState<Metric>("zmean");
   const [colorMode, setColorMode] = useState<"section" | "fixed">("section");
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 

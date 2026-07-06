@@ -222,6 +222,20 @@ export function colorByGroups(columns: ColumnInfo[]): FieldGroup[] {
 }
 
 /**
+ * Grouped continuous fields usable as correlation-scatter axes: the color-by options minus
+ * categoricals (an ordinal axis isn't a scatterplot) and create_time (raw epoch seconds on a
+ * linear axis read as meaningless magnitudes; a proper date axis can come later if wanted).
+ */
+export function axisGroups(columns: ColumnInfo[]): FieldGroup[] {
+  return colorByGroups(columns)
+    .map((g) => ({
+      group: g.group,
+      items: g.items.filter((it) => !it.categorical && it.name !== "create_time"),
+    }))
+    .filter((g) => g.items.length > 0);
+}
+
+/**
  * Continuous fields the correlation strip can use — the union of every possible ProfileStrip row
  * AND color-by (continuous, non-id, non-excluded, non-hidden, non-categorical). Ingest precomputes
  * a global rank column for exactly these, so `corr()` on the ranks yields (approximate) Spearman.

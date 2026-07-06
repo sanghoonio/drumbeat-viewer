@@ -120,12 +120,24 @@ function HistCard({ coordinator, sel, col, kind, scale, onScale, onRemove }: {
     const el = ref.current;
     let disposed = false;
     let plotInst: any = null;
-    // Removing a plot's SVG orphans its interval-brush clause in `cross` (the brush vanishes
-    // but keeps dimming the umap). Clear THIS plot's interactor clauses before replacing it.
-    const clearInteractors = () => {
+    // Teardown of the outgoing plot (same leak class as Scatter's):
+    //  - Removing a plot's SVG orphans its interval-brush clause in `cross` (the brush
+    //    vanishes but keeps dimming the umap) — clear THIS plot's interactor clauses.
+    //  - vgplot connects the densityY mark to the coordinator but never disconnects it, and
+    //    this effect rebuilds on every clamp-input keystroke (dLo/dHi), scale change, and
+    //    resize — each stale mark would stay in the histFilter group and re-run its KDE
+    //    query on every selection change. destroy() → coordinator.disconnect + cleanup.
+    const teardown = () => {
       for (const it of plotInst?.interactors ?? []) {
         try {
           it.selection?.update({ source: it, value: null, predicate: null });
+        } catch {
+          /* ignore */
+        }
+      }
+      for (const m of plotInst?.marks ?? []) {
+        try {
+          m.destroy?.();
         } catch {
           /* ignore */
         }
@@ -136,7 +148,7 @@ function HistCard({ coordinator, sel, col, kind, scale, onScale, onRemove }: {
       if (disposed) return;
       const w = el.clientWidth;
       if (!w) return;
-      clearInteractors();
+      teardown();
       const api = vg.createAPIContext({ coordinator });
       const { x, fmt } = xConfig(col, kind, scale);
       const plotEl = api.plot(
@@ -168,7 +180,7 @@ function HistCard({ coordinator, sel, col, kind, scale, onScale, onRemove }: {
     return () => {
       disposed = true;
       ro.disconnect();
-      clearInteractors();
+      teardown();
       el.replaceChildren();
     };
   }, [coordinator, sel, col, kind, scale, clamped, dLo, dHi]);

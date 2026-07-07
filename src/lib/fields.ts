@@ -13,14 +13,18 @@ const EXCLUDE = new Set([
   "hashtags", "music_title", "caption",
 ]);
 
-// De-cluttering: hide caption + on-screen (OCR) channels entirely, every *_arc metric (not
-// informative), and the VADER polarity LEVELS (compound / segment mean·min·max) that duplicate
-// RoBERTa sentiment + VAD valence. Kept: VADER segment std/p_neg/p_pos/n_seg.
-const HIDE_PREFIX = ["cap_", "ocr_"];
+// De-cluttering: hide every *_arc metric (not informative) and the VADER polarity LEVELS
+// (compound / segment mean·min·max) that duplicate RoBERTa sentiment + VAD valence.
+// Kept: VADER segment std/p_neg/p_pos/n_seg. Caption (cap_) + on-screen (ocr_) channels
+// were hidden here for a while but re-enabled 2026-07: the correlation sweep found real
+// signal in them (cap_roberta_neg, ocr_vad_arousal, ocr_vader_seg_min → share_rate).
+const HIDE_PREFIX: string[] = [];
 const HIDE_EXACT = new Set([
-  "all_vader_compound", "tr_vader_compound",
+  "all_vader_compound", "tr_vader_compound", "cap_vader_compound",
   "tr_vader_seg_mean", "tr_vader_seg_min", "tr_vader_seg_max",
   "hook_vader_seg_mean", "hook_vader_seg_min", "hook_vader_seg_max",
+  // ocr_vader_* levels stay visible: OCR has no RoBERTa scores, so VADER is the only
+  // on-screen sentiment (and ocr_vader_seg_min → share_rate is a live finding).
 ]);
 function isHidden(name: string): boolean {
   return name.endsWith("__rank") // precomputed rank sentinel columns (see rankableColumns)

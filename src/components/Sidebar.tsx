@@ -121,39 +121,39 @@ export function Sidebar({ columns, rowCount, fileName, onRemove, legendRef }: Pr
       )}
 
       <label className="block">
-        <span className="mb-1 block text-xs font-medium text-base-content/70">Color by</span>
-        <select
-          className="select select-bordered select-sm w-full"
-          value={colorBy ?? ""}
-          onChange={(e) => setColorBy(e.target.value || null)}
-        >
-          <option value="">(none)</option>
-          {groups.map((g) => (
-            <optgroup key={g.group} label={g.group}>
-              {g.items.map((it) => (
-                <option key={it.name} value={it.name}>
-                  {it.label}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-      </label>
-
-      {continuous && (
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium text-base-content/70">Scale</span>
+        <span className="mb-1 block text-xs font-medium text-base-content/70">Color</span>
+        <div className="flex gap-1.5">
           <select
-            className="select select-bordered select-sm w-full"
-            value={scaleType}
-            onChange={(e) => setScaleType(e.target.value as ScaleType)}
+            className="select select-bordered select-sm min-w-0 flex-1"
+            value={colorBy ?? ""}
+            onChange={(e) => setColorBy(e.target.value || null)}
           >
-            <option value="linear">linear</option>
-            <option value="sqrt">sqrt</option>
-            <option value="log">log</option>
+            <option value="">(none)</option>
+            {groups.map((g) => (
+              <optgroup key={g.group} label={g.group}>
+                {g.items.map((it) => (
+                  <option key={it.name} value={it.name}>
+                    {it.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
           </select>
-        </label>
-      )}
+          {continuous && (
+            <select
+              className="select select-bordered select-sm w-20 shrink-0"
+              value={scaleType}
+              onChange={(e) => setScaleType(e.target.value as ScaleType)}
+              title="Color scale"
+              aria-label="Color scale"
+            >
+              <option value="linear">linear</option>
+              <option value="sqrt">sqrt</option>
+              <option value="log">log</option>
+            </select>
+          )}
+        </div>
+      </label>
 
       <div>
         <span className="mb-1 block text-xs font-medium text-base-content/70">Legend</span>

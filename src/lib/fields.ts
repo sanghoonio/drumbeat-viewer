@@ -170,7 +170,7 @@ const METRIC_DESC: Record<string, string> = {
   vader_seg_n_seg: "Number of scored segments in the channel.",
   vad_valence: "NRC-VAD valence: unpleasant → pleasant word tone.",
   vad_arousal: "NRC-VAD arousal: calm → excited/intense word tone.",
-  vad_dominance: "NRC-VAD dominance: powerless/submissive → powerful/in-control word tone.",
+  vad_dominance: "NRC-VAD dominance: powerless → powerful word tone.",
   subjectivity: "TextBlob subjectivity: 0 factual → 1 opinionated.",
   polarity: "TextBlob polarity: −1 negative → +1 positive.",
   roberta_neg: "RoBERTa transformer: mean probability of negative sentiment.",

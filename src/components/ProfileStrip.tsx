@@ -436,7 +436,7 @@ export function ProfileStrip({
                   {fmtC(stat[hover.name] ?? null)}
                 </span>
               </div>
-              {desc && <div className="mt-0.5 text-base-content/55">{desc}</div>}
+              {desc && <div className="mt-0.5 whitespace-pre-line text-base-content/55">{desc}</div>}
             </div>
           );
         })()}

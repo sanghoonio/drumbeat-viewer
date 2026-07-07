@@ -32,7 +32,7 @@ function isHidden(name: string): boolean {
 }
 
 const CHANNEL: Record<string, string> = {
-  cap: "Caption", tr: "Transcript", hook: "Hook", ocr: "On-screen", all: "All text", body: "Body",
+  cap: "Caption", tr: "Transcript", hook: "Hook", ocr: "On-screen", all: "All text",
 };
 
 // Standalone (non-channel) columns.
@@ -89,7 +89,7 @@ export function defaultScale(name: string): ScaleType {
 }
 
 // Sort order within a group: channel first, then a fixed metric order.
-const CH_RANK: Record<string, number> = { cap: 0, tr: 1, hook: 2, ocr: 3, all: 4, body: 5 };
+const CH_RANK: Record<string, number> = { tr: 0, hook: 1, ocr: 2, all: 3, cap: 4 };
 const METRIC_ORDER = [
   "vader_compound", "vader_pos", "vader_neg",
   "vader_seg_mean", "vader_seg_std", "vader_seg_min", "vader_seg_max",
@@ -146,21 +146,37 @@ export function fieldLabel(name: string): string {
   return name;
 }
 
+// What each text channel is, appended to every channel metric's tooltip
+// (definitions from the atlas affect stage: src/atlas/affect.py).
+const CHANNEL_DESC: Record<string, string> = {
+  cap: "Caption: the post's caption text.",
+  tr: "Transcript: Whisper speech-to-text of the video's audio.",
+  hook: "Hook: the video's opening (first 2 transcript segments).",
+  ocr: "On-screen: text OCR'd from the video frames.",
+  all: "All text: caption + transcript + on-screen combined.",
+};
+
 // One-line "what is this" descriptions, keyed by metric suffix / exact name.
 const METRIC_DESC: Record<string, string> = {
-  vader_seg_std: "Volatility of VADER rule-based sentiment across segments.",
-  vader_seg_p_neg: "Share of segments VADER scored net-negative.",
-  vader_seg_p_pos: "Share of segments VADER scored net-positive.",
-  vader_seg_n_seg: "Number of transcript segments.",
+  vader_compound: "VADER rule-based sentiment: −1 negative → +1 positive, scored on the whole text at once.",
+  vader_pos: "VADER: fraction of the text's words carrying positive valence.",
+  vader_neg: "VADER: fraction of the text's words carrying negative valence.",
+  vader_seg_mean: "Average of per-segment VADER sentiment.",
+  vader_seg_min: "Most negative segment's VADER sentiment.",
+  vader_seg_max: "Most positive segment's VADER sentiment.",
+  vader_seg_std: "Standard deviation of per-segment VADER sentiment — how much the tone swings.",
+  vader_seg_p_neg: "Fraction of segments whose net VADER score is negative.",
+  vader_seg_p_pos: "Fraction of segments whose net VADER score is positive.",
+  vader_seg_n_seg: "Number of scored segments in the channel.",
   vad_valence: "NRC-VAD valence: unpleasant → pleasant word tone.",
   vad_arousal: "NRC-VAD arousal: calm → excited/intense word tone.",
-  vad_dominance: "NRC-VAD dominance: controlled → in-control word tone.",
+  vad_dominance: "NRC-VAD dominance: powerless/submissive → powerful/in-control word tone.",
   subjectivity: "TextBlob subjectivity: 0 factual → 1 opinionated.",
   polarity: "TextBlob polarity: −1 negative → +1 positive.",
   roberta_neg: "RoBERTa transformer: mean probability of negative sentiment.",
   roberta_neu: "RoBERTa transformer: mean probability of neutral sentiment.",
   roberta_pos: "RoBERTa transformer: mean probability of positive sentiment.",
-  roberta_pos_std: "Volatility of RoBERTa positive probability across segments.",
+  roberta_pos_std: "Standard deviation of per-segment RoBERTa positive probability — how much the tone swings.",
   n_words: "Word count.",
   ttr: "Type-token ratio: lexical diversity (unique / total words).",
   flesch: "Flesch reading ease: higher is easier to read.",
@@ -180,14 +196,19 @@ const META_DESC: Record<string, string> = {
   onscreen_confidence: "On-screen (OCR) text confidence.",
 };
 
-/** One-line description of a field, for tooltips. Empty string if none known. */
+/**
+ * One-line description of a field, for tooltips. Channel metrics get the metric explanation
+ * plus a note on what the channel is; empty string if nothing is known.
+ */
 export function fieldDescription(name: string): string {
   if (META_DESC[name]) return META_DESC[name];
   const cs = channelSplit(name);
   if (cs) {
-    const rest = cs[1];
-    if (rest.startsWith("goemo_")) return `GoEmotions: probability the text expresses ${rest.slice(6)}.`;
-    if (METRIC_DESC[rest]) return METRIC_DESC[rest];
+    const [ch, rest] = cs;
+    const metric = rest.startsWith("goemo_")
+      ? `GoEmotions: probability the text expresses ${rest.slice(6)}.`
+      : METRIC_DESC[rest] ?? "";
+    return [metric, CHANNEL_DESC[ch] ?? ""].filter(Boolean).join("\n");
   }
   return "";
 }

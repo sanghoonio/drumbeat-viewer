@@ -18,7 +18,7 @@ import { ProfileStrip } from "./components/ProfileStrip";
 import { DropZone } from "./components/DropZone";
 
 export function App() {
-  const { ready, columns, rowCount, fileName, loading, loadFile, clear, coordinator, error } = useCoordinator();
+  const { ready, columns, rowCount, fileName, loading, loadFile, loadUrl, clear, coordinator, error } = useCoordinator();
   const {
     xCol, yCol, colorBy, scaleType, setXY, setColorBy,
     plotMode, setPlotMode, corrX, corrY, corrXScale, corrYScale, setCorrX, setCorrY,
@@ -27,6 +27,24 @@ export function App() {
   const legendRef = useRef<HTMLDivElement>(null);
   const themeMode = useTheme((s) => s.mode);
   useEffect(() => applyTheme(themeMode), [themeMode]);
+
+  // Deep-link ingest: atlas "Open in viewer" opens us at `#src=<presigned R2 url>`. Capture it,
+  // SCRUB the fragment immediately (history.replaceState — the URL is a short-lived capability, so
+  // keep it out of the address bar / history / copy-paste), then fetch straight from R2. Runs once.
+  const bootedRef = useRef(false);
+  useEffect(() => {
+    if (!ready || bootedRef.current) return;
+    bootedRef.current = true;
+    const m = window.location.hash.match(/[#&]src=([^&]+)/);
+    if (!m) return;
+    const url = decodeURIComponent(m[1]);
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    let name = "export.parquet";
+    try {
+      name = new URL(url).pathname.split("/").pop() || name; // keep the .parquet ext for the reader
+    } catch { /* keep default */ }
+    void loadUrl(url, name);
+  }, [ready, loadUrl]);
 
   useEffect(() => {
     if (columns.length === 0) return;

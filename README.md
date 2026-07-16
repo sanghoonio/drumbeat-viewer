@@ -1,9 +1,9 @@
 # Drumbeat Viewer
 
 A self-contained web app for exploring **Drumbeat Atlas** analysis exports. Drop an export
-(Parquet / CSV / JSON) and explore it as an interactive embedding map — entirely in the
-browser via **DuckDB-wasm** + **Mosaic / vgplot**. No API server; all queries run against
-DuckDB in the page, so nothing you drop leaves your machine.
+(Parquet / CSV / JSON) — or open one straight from the atlas **Exports** page — and explore it
+as an interactive embedding map, entirely in the browser via **DuckDB-wasm** + **Mosaic /
+vgplot**. No API server; all queries run against DuckDB in the page, so nothing leaves your machine.
 
 Deployed at **[drumbeat-viewer.pages.dev](https://drumbeat-viewer.pages.dev)** (Cloudflare Pages).
 
@@ -18,6 +18,12 @@ Then drop an atlas analysis export. The ideal input is the combined **`analysis`
 (`topic ⋈ embeddings ⋈ affect`, one row per post with `umap_x` / `umap_y`, `cluster`,
 `cluster_keywords`, engagement counts, and affect/sentiment metrics). Any flat post-level
 export works — the UI discovers columns generically and adapts.
+
+**Deep-link ingest.** The atlas Exports page can open a published parquet directly here via a
+`#src=<presigned R2 url>` fragment: the viewer captures the URL, scrubs the fragment immediately
+(it's a short-lived, single-use capability — kept out of history/address bar), and `fetch`es the
+parquet straight from R2 into the same DuckDB pipeline. No download-and-re-drop. (Requires the R2
+bucket's CORS policy to allow this origin — see the atlas `docs/worker.md`.)
 
 ## Features
 

@@ -37,6 +37,7 @@ interface CoordinatorState {
   fileName: string | null;
   loading: LoadingState | null;
   loadFile: (file: File) => Promise<void>;
+  loadUrl: (url: string, name?: string) => Promise<void>;
   clear: () => void;
   error: string | null;
 }
@@ -77,8 +78,50 @@ export function CoordinatorProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const state = useMemo<CoordinatorState>(
-    () => ({
+  const state = useMemo<CoordinatorState>(() => {
+    const loadFile = async (file: File) => {
+      if (!dbRef.current || !connRef.current) throw new Error("duckdb not ready");
+      setError(null);
+      setLoading({ name: file.name, label: "reading file…", frac: 0 });
+      try {
+        const { columns, rowCount } = await ingestFile(
+          dbRef.current,
+          connRef.current,
+          file,
+          (label, frac) => setLoading({ name: file.name, label, frac }),
+        );
+        coordinatorRef.current?.clear({ clients: true, cache: true });
+        setColumns(columns);
+        setRowCount(rowCount);
+        setFileName(file.name);
+      } catch (e) {
+        setError(String(e));
+        throw e;
+      } finally {
+        setLoading(null);
+      }
+    };
+    // Fetch a presigned export straight from R2 (atlas "Open in viewer" opens us with the URL in
+    // the fragment), then hand the bytes to the SAME ingest path a dropped file takes. Bytes go
+    // R2→browser; nothing proxies them. The URL is time-limited and single-use, so on failure we
+    // don't retry — the App surfaces the error and the user reopens from atlas.
+    const loadUrl = async (url: string, name = "export.parquet") => {
+      if (!dbRef.current) throw new Error("duckdb not ready");
+      setError(null);
+      setLoading({ name, label: "downloading export…", frac: 0.02 });
+      let file: File;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        file = new File([await res.blob()], name);
+      } catch {
+        setError("Couldn't load this export (the link may have expired). Reopen it from atlas.");
+        setLoading(null);
+        return;
+      }
+      await loadFile(file);
+    };
+    return {
       coordinator: coordinatorRef.current,
       db: dbRef.current,
       conn: connRef.current,
@@ -88,28 +131,8 @@ export function CoordinatorProvider({ children }: { children: ReactNode }) {
       fileName,
       loading,
       error,
-      loadFile: async (file: File) => {
-        if (!dbRef.current || !connRef.current) throw new Error("duckdb not ready");
-        setError(null);
-        setLoading({ name: file.name, label: "reading file…", frac: 0 });
-        try {
-          const { columns, rowCount } = await ingestFile(
-            dbRef.current,
-            connRef.current,
-            file,
-            (label, frac) => setLoading({ name: file.name, label, frac }),
-          );
-          coordinatorRef.current?.clear({ clients: true, cache: true });
-          setColumns(columns);
-          setRowCount(rowCount);
-          setFileName(file.name);
-        } catch (e) {
-          setError(String(e));
-          throw e;
-        } finally {
-          setLoading(null);
-        }
-      },
+      loadFile,
+      loadUrl,
       clear: () => {
         setError(null);
         setColumns([]);
@@ -118,9 +141,8 @@ export function CoordinatorProvider({ children }: { children: ReactNode }) {
         connRef.current?.query("DROP TABLE IF EXISTS data").catch(() => {});
         coordinatorRef.current?.clear({ clients: true, cache: true });
       },
-    }),
-    [ready, columns, rowCount, fileName, loading, error],
-  );
+    };
+  }, [ready, columns, rowCount, fileName, loading, error]);
 
   return <Ctx.Provider value={state}>{children}</Ctx.Provider>;
 }

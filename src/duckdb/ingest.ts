@@ -6,7 +6,7 @@
  * TODO (per plan): multi-file drop + join on post_id (drop embeddings + affect +
  * topic separately and JOIN into `data`). v1 handles a single combined export.
  */
-import { classifyColumns, type ColumnInfo } from "../lib/columns";
+import { classifyColumns, defaultXY, type ColumnInfo } from "../lib/columns";
 import { rankableColumns } from "../lib/fields";
 
 export type { ColumnInfo };
@@ -60,7 +60,30 @@ export async function ingestFile(
   if (nRows > ROW_LIMIT) {
     await db.dropFile?.(vname)?.catch(() => {});
     throw new Error(
-      `Export has ${nRows.toLocaleString()} rows, over the ${ROW_LIMIT.toLocaleString()}-row limit — filter or subset it first.`,
+      `Export has ${nRows.toLocaleString()} rows, over the ${ROW_LIMIT.toLocaleString()}-row limit. Filter or subset it first.`,
+    );
+  }
+
+  // Minimum-schema gate, checked BEFORE materializing (DESCRIBE on the reader is metadata-cheap).
+  // The floor: a numeric embedding pair (the scatter's axes) + post_id (the selection machinery —
+  // region/nearest/pin/detail — channels on it unguarded). Everything above the floor degrades
+  // gracefully (guarded derives, has()-checked panels); below it, reject with a clear message
+  // instead of ingesting fully and bouncing back to the drop zone with no explanation.
+  const preRows: { name: string; type: string }[] = (
+    await conn.query(`DESCRIBE SELECT * FROM ${reader}`)
+  )
+    .toArray()
+    .map((r: any) => ({ name: String(r.column_name), type: String(r.column_type) }));
+  const pre = classifyColumns(preRows);
+  const { x: preX, y: preY } = defaultXY(pre);
+  const missing: string[] = [];
+  if (!preX || !preY) missing.push("numeric embedding coordinates (umap_x / umap_y)");
+  if (!pre.some((c) => c.name === "post_id")) missing.push("a post_id column");
+  if (missing.length) {
+    await db.dropFile?.(vname)?.catch(() => {});
+    throw new Error(
+      `This file isn't a viewer export. It's missing ${missing.join(" and ")}. ` +
+        `Export a campaign parquet from atlas and load that.`,
     );
   }
 

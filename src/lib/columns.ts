@@ -39,10 +39,11 @@ export function defaultColorBy(cols: ColumnInfo[]): string | null {
   return cont?.name ?? null;
 }
 
-/** best-guess x/y columns for the embedding scatter */
+/** best-guess x/y columns for the embedding scatter — numeric (continuous) only, so a
+ * VARCHAR column that happens to be named umap_x can't be handed to the scatter as an axis */
 export function defaultXY(cols: ColumnInfo[]): { x: string | null; y: string | null } {
-  const names = new Set(cols.map((c) => c.name));
-  const x = ["umap_x", "x", "umap_1", "tsne_x"].find((n) => names.has(n)) ?? null;
-  const y = ["umap_y", "y", "umap_2", "tsne_y"].find((n) => names.has(n)) ?? null;
+  const cont = new Set(cols.filter((c) => c.kind === "continuous").map((c) => c.name));
+  const x = ["umap_x", "x", "umap_1", "tsne_x"].find((n) => cont.has(n)) ?? null;
+  const y = ["umap_y", "y", "umap_2", "tsne_y"].find((n) => cont.has(n)) ?? null;
   return { x, y };
 }

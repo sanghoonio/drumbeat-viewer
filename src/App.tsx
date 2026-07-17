@@ -17,6 +17,10 @@ import { DistPlots } from "./components/DistPlots";
 import { ProfileStrip } from "./components/ProfileStrip";
 import { DropZone } from "./components/DropZone";
 
+/** The always-current demo export: a stable public object in the drumbeat-demo R2 bucket
+ * (permanent URL — no auth/presign; republishing the demo overwrites the same key). */
+const DEMO_URL = "https://pub-8848259b62fd429ea9e95a791679c03d.r2.dev/demo.parquet";
+
 export function App() {
   const { ready, columns, rowCount, fileName, loading, loadFile, loadUrl, clear, coordinator, error } = useCoordinator();
   const {
@@ -105,7 +109,9 @@ export function App() {
         </div>
       )}
 
-      {ready && !hasData && <DropZone onFile={loadFile} error={error} />}
+      {ready && !hasData && (
+        <DropZone onFile={loadFile} onDemo={() => void loadUrl(DEMO_URL, "demo.parquet")} error={error} />
+      )}
 
       {/* Ingest overlay (parse + derived fields + rank precompute) — style matches pegasus'
           database-download screen: blurred full-screen veil, thin phase-weighted bar, caption. */}

@@ -119,7 +119,9 @@ export function CoordinatorProvider({ children }: { children: ReactNode }) {
         setLoading(null);
         return;
       }
-      await loadFile(file);
+      // loadFile sets the error state and rethrows; swallow here so `void loadUrl(...)`
+      // callers (deep link, demo button) don't produce unhandled rejections.
+      await loadFile(file).catch(() => {});
     };
     return {
       coordinator: coordinatorRef.current,

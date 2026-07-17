@@ -5,9 +5,11 @@ import { Upload } from "lucide-react";
 
 export function DropZone({
   onFile,
+  onDemo,
   error,
 }: {
   onFile: (f: File) => void;
+  onDemo?: () => void;
   error: string | null;
 }) {
   const [over, setOver] = useState(false);
@@ -50,6 +52,15 @@ export function DropZone({
           }}
         />
       </button>
+      {onDemo && (
+        <button
+          type="button"
+          className="cursor-pointer text-xs text-base-content/50 underline-offset-2 transition-colors hover:text-base-content hover:underline"
+          onClick={onDemo}
+        >
+          try the demo dataset
+        </button>
+      )}
       {error && <p className="max-w-md text-center text-xs text-error">{error}</p>}
     </div>
   );
